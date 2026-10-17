@@ -1,0 +1,26 @@
+{% extends 'base.html' %}{% block body %}
+<div class="card"><h2>Your match</h2>
+{% if not chain %}<p>No match yet. We re-check automatically whenever anyone adds or changes choices, and you will get an email when one is found.</p>
+{% else %}
+<p class="muted">{% if status == 'confirmed' %}Confirmed by everyone.{% else %}Proposed. Waiting for all members to accept.{% endif %}</p>
+<ol class="chain">{% for m in chain %}<li class="{{ 'me' if m.me }}">{{ m.name }}{{ ' (you)' if m.me }} · {{ m.designation }}, {{ m.department }}<br>{{ m.frm }} → {{ m.to }}
+{% if not m.me %}<br><span class="muted">{{ m.mobile }} · {{ m.email }}</span>{% endif %}
+{% if status == 'pending' %}<br><span class="muted">{{ 'Accepted' if m.resp == 'accept' else 'Awaiting response' }}</span>{% endif %}</li>{% endfor %}</ol>
+{% if status == 'pending' %}<form method="post" action="/match/respond" class="row" onsubmit="return confirm('Are you sure?')">
+<input type="hidden" name="csrf" value="{{ csrf() }}">
+{% if my_resp != 'accept' %}<button name="action" value="accept">Accept</button>{% endif %}
+<button name="action" value="reject" class="alt">Reject</button></form>{% endif %}
+{% endif %}</div>
+
+<div class="card"><h2>Preferred stations</h2>
+<form method="post" action="/choices"><input type="hidden" name="csrf" value="{{ csrf() }}">
+{% for i in range(5) %}<label class="muted">Choice {{ i + 1 }} {{ '(required)' if i == 0 else '(optional)' }}</label>
+<select name="c" {{ 'required' if i == 0 }} {{ 'disabled' if chain }}><option value="">None</option>
+{% for s in stations if s.name != u.station %}<option {{ 'selected' if choices|length > i and choices[i] == s.name }}>{{ s.name }}</option>{% endfor %}</select>{% endfor %}
+{% if chain %}<p class="muted">Respond to your match before changing choices.</p>{% else %}<button>Save choices</button>{% endif %}</form></div>
+
+<div class="card"><h2>Your profile</h2>
+<p>{{ u.name }}<br><span class="muted">{{ u.designation }} · {{ u.department }} · {{ u.station }}</span></p>
+<form method="post" action="/mobile"><input type="hidden" name="csrf" value="{{ csrf() }}">
+<label class="muted">Mobile number</label><input name="mobile" value="{{ u.mobile }}" required inputmode="numeric"><button class="alt">Update mobile</button></form></div>
+{% endblock %}

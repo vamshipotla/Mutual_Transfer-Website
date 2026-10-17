@@ -1,0 +1,33 @@
+{% extends 'base.html' %}{% block body %}
+<div class="card"><h1>Admin</h1>
+<p class="muted">{{ stats.users }} users · {{ stats.with_choices }} with choices · {{ stats.pending }} pending · {{ stats.confirmed }} confirmed</p>
+<form method="post" action="/admin/settings"><input type="hidden" name="csrf" value="{{ csrf() }}">
+<label class="muted">Designation rank difference allowed (K)</label><input type="number" name="K" value="{{ K }}" min="0" max="20">
+<label class="muted">Maximum cycle length (N, people in one chain)</label><input type="number" name="N" value="{{ N }}" min="2" max="30">
+<button>Save settings and re-match</button></form></div>
+
+<div class="card"><h2>Dropdown data (Excel)</h2>
+<p class="muted">Sheets: Stations, Designations (Designation, Rank), Departments.</p>
+<form method="post" action="/admin/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf() }}">
+<input type="file" name="file" accept=".xlsx" required><button>Upload Excel</button></form>
+<div class="row"><form method="post" action="/admin/rematch"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="alt">Re-run matching</button></form>
+<form method="post" action="/admin/clearblocks"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="alt">Clear rejected blocks</button></form></div>
+<a href="/admin/export">Download matches (Excel)</a></div>
+
+{% if edit %}<div class="card"><h2>Edit {{ edit.email }}</h2>
+<form method="post" action="/admin/user/{{ edit.id }}"><input type="hidden" name="csrf" value="{{ csrf() }}">
+<input name="full_name" value="{{ edit.name }}" required><input name="mobile" value="{{ edit.mobile }}" required>
+<select name="station">{% for s in stations %}<option {{ 'selected' if s.name == edit.station }}>{{ s.name }}</option>{% endfor %}</select>
+<select name="designation">{% for d in designations %}<option {{ 'selected' if d.name == edit.designation }}>{{ d.name }}</option>{% endfor %}</select>
+<select name="department">{% for d in departments %}<option {{ 'selected' if d.name == edit.department }}>{{ d.name }}</option>{% endfor %}</select>
+<button>Save (emails you the change)</button></form></div>{% endif %}
+
+<div class="card"><h2>Users</h2>
+<form method="get"><input name="q" value="{{ q }}" placeholder="Search name or email"></form>
+<table><tr><th>Name</th><th>Email</th><th>Station</th><th>Desig.</th><th>Choices</th><th></th></tr>
+{% for x in users %}<tr><td>{{ x.name }}</td><td>{{ x.email }}</td><td>{{ x.station }}</td><td>{{ x.designation }}</td><td>{{ x.clist|join(', ') }}</td><td><a href="/admin?edit={{ x.id }}">Edit</a></td></tr>{% endfor %}</table></div>
+
+<div class="card"><h2>Matches</h2>
+<table><tr><th>#</th><th>Status</th><th>Chain</th></tr>
+{% for m in matches %}<tr><td>{{ m.id }}</td><td>{{ m.status }}</td><td>{% for x in m.members %}{{ x.user.name }} ({{ x.user.station }}){{ ' → ' if not loop.last }}{% endfor %}</td></tr>{% endfor %}</table></div>
+{% endblock %}

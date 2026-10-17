@@ -1,0 +1,11 @@
+{% extends 'base.html' %}{% block body %}
+<div class="card"><h1>Complete your profile</h1>
+<p class="muted">Name, station, designation and department cannot be changed after saving. Only the admin can edit them.</p>
+<form method="post" onsubmit="var e=this.elements;return confirm('Please confirm. These CANNOT be changed later:\n\nName: '+e.full_name.value+'\nStation: '+e.station.value+'\nDesignation: '+e.designation.value+'\nDepartment: '+e.department.value)">
+<input type="hidden" name="csrf" value="{{ csrf() }}">
+<input name="full_name" placeholder="Full name" required maxlength="80">
+<input name="mobile" placeholder="Mobile number (10 digits)" required inputmode="numeric">
+<select name="station" required><option value="">Current station</option>{% for s in stations %}<option>{{ s.name }}</option>{% endfor %}</select>
+<select name="designation" required><option value="">Designation</option>{% for d in designations %}<option>{{ d.name }}</option>{% endfor %}</select>
+<select name="department" required><option value="">Department</option>{% for d in departments %}<option>{{ d.name }}</option>{% endfor %}</select>
+<button>Save profile</button></form></div>{% endblock %}

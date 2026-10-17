@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Mutual Transfer</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body>
+<header><a href="/">Mutual Transfer</a>
+{% if is_admin() %}<a href="/admin" style="margin:0;font-weight:400">Admin</a>{% endif %}
+{% if session.email %}<span class="muted">{{ session.email }}</span>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="link">Logout</button></form>{% endif %}</header>
+<main>{% for c, t in get_flashed_messages(with_categories=true) %}<div class="msg {{ c }}">{{ t }}</div>{% endfor %}
+{% block body %}{% endblock %}</main></body></html>
