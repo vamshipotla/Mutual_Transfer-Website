@@ -29,6 +29,7 @@ db = SQLAlchemy(app)
 LOCK = threading.Lock()
 GMAIL = re.compile(r"^[a-z0-9._+-]+@gmail\.com$")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
+OTP_ENABLED = os.environ.get("OTP_ENABLED") == "1"  # email OTP is off unless set to 1
 
 
 def canon(email):
@@ -244,7 +245,7 @@ def drop_match(match, block=False):
 # ---------------------------------------------------------------- auth routes
 @app.route("/login")
 def login():
-    return render_template("login.html", gid=GOOGLE_CLIENT_ID)
+    return render_template("login.html", gid=GOOGLE_CLIENT_ID, otp=OTP_ENABLED)
 
 
 @app.post("/logout")
@@ -256,6 +257,8 @@ _ip_hits = {}
 
 @app.post("/otp/send")
 def otp_send():
+    if not OTP_ENABLED:
+        abort(404)
     email = canon(request.form.get("email"))
     if not email:
         return jsonify(ok=False, msg="Only Gmail addresses (@gmail.com) are allowed."), 400
@@ -277,6 +280,8 @@ def otp_send():
 
 @app.post("/otp/verify")
 def otp_verify():
+    if not OTP_ENABLED:
+        abort(404)
     email, code = canon(request.form.get("email")), (request.form.get("otp") or "").strip()
     o = email and Otp.query.filter_by(email=email).order_by(Otp.id.desc()).first()
     if not o or o.expires < datetime.utcnow() or o.tries >= 5:

@@ -1,20 +1,21 @@
 {% extends 'base.html' %}{% block body %}
-<div class="card"><h1>Sign in</h1><p class="muted">Gmail accounts only. Choose either method.</p>
+<div class="card"><h1>Sign in</h1><p class="muted">Use your Gmail account.</p>
 {% if gid %}<script src="https://accounts.google.com/gsi/client" async defer></script>
 <div id="g_id_onload" data-client_id="{{ gid }}" data-callback="onGoogle" data-auto_prompt="false"></div>
 <div class="g_id_signin" data-type="standard" data-width="280"></div>
-<p class="muted center">or use email OTP</p>{% endif %}
+{% else %}<p class="msg error">Google sign-in is not configured (GOOGLE_CLIENT_ID missing).</p>{% endif %}
+{% if otp %}<p class="muted center">or use email OTP</p>
 <input id="email" type="email" placeholder="yourname@gmail.com" autocomplete="email">
 <button id="send">Send OTP</button>
-<div id="otpbox" hidden><input id="otp" inputmode="numeric" maxlength="6" placeholder="6-digit OTP"><button id="verify">Verify &amp; sign in</button></div>
+<div id="otpbox" hidden><input id="otp" inputmode="numeric" maxlength="6" placeholder="6-digit OTP"><button id="verify">Verify &amp; sign in</button></div>{% endif %}
 <p id="status" class="muted"></p></div>
 <script>
 const CSRF="{{ csrf() }}",$=i=>document.getElementById(i),st=t=>$('status').textContent=t;
 async function post(url,body,json){const h={'X-CSRF':CSRF};if(json)h['Content-Type']='application/json';
  const r=await fetch(url,{method:'POST',headers:h,body});return [r.ok,await r.json()]}
-$('send').onclick=async()=>{const f=new FormData();f.append('email',$('email').value);
+async function onGoogle(r){const [ok,j]=await post('/google',JSON.stringify({credential:r.credential}),true);ok?location.href='/':st(j.msg)}
+{% if otp %}$('send').onclick=async()=>{const f=new FormData();f.append('email',$('email').value);
  const [ok,j]=await post('/otp/send',f);st(j.msg);if(ok)$('otpbox').hidden=false};
 $('verify').onclick=async()=>{const f=new FormData();f.append('email',$('email').value);f.append('otp',$('otp').value);
- const [ok,j]=await post('/otp/verify',f);ok?location.href='/':st(j.msg)};
-async function onGoogle(r){const [ok,j]=await post('/google',JSON.stringify({credential:r.credential}),true);ok?location.href='/':st(j.msg)}
+ const [ok,j]=await post('/otp/verify',f);ok?location.href='/':st(j.msg)};{% endif %}
 </script>{% endblock %}
