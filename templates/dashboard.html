@@ -1,6 +1,8 @@
 {% extends 'base.html' %}{% block body %}
+{% if not on %}<div class="msg">Matching is paused by the admin. You can still save your choices; matches will appear when it is switched back on.</div>{% endif %}
+{% if u.no_transfer and not chain %}<div class="msg">You have marked that you currently don't need a transfer. You can still browse here and change your choices below anytime.</div>{% endif %}
 <div class="card"><h2>Your match</h2>
-{% if not chain %}<p>No match yet. We re-check automatically whenever anyone adds or changes choices, and you will get an email when one is found.</p>
+{% if not chain %}<p>{{ 'You are not looking for a transfer right now.' if u.no_transfer else 'No match yet. We re-check automatically whenever anyone adds or changes choices.' }}</p>
 {% else %}
 <p class="muted">{% if status == 'confirmed' %}Confirmed by everyone.{% else %}Proposed. Waiting for all members to accept.{% endif %}</p>
 <ol class="chain">{% for m in chain %}<li class="{{ 'me' if m.me }}">{{ m.name }}{{ ' (you)' if m.me }} · {{ m.designation }}, {{ m.department }}<br>{{ m.frm }} → {{ m.to }}
@@ -10,17 +12,33 @@
 <input type="hidden" name="csrf" value="{{ csrf() }}">
 {% if my_resp != 'accept' %}<button name="action" value="accept">Accept</button>{% endif %}
 <button name="action" value="reject" class="alt">Reject</button></form>{% endif %}
-{% endif %}</div>
+{% endif %}
+<p class="muted"><a href="/how-it-works">How this works</a></p></div>
+
+{% if hints %}<div class="card"><h2>Almost matches</h2>
+<p class="muted">These are blocked only by designation difference. Names are hidden.</p>
+{% for h in hints %}<p class="hint">• {{ h }}</p>{% endfor %}</div>{% endif %}
+
+{% if recent %}<div class="card"><h2>Recent requests</h2>
+{% for r in recent %}<p class="hint">{{ r.designation }} at <b>{{ r.station }}</b> wants {{ r.wants }}<br><span class="muted">{{ r.ago }}</span></p>{% endfor %}</div>{% endif %}
 
 <div class="card"><h2>Preferred stations</h2>
+<datalist id="choice1-stations"><option value="{{ no_transfer_text }}" data-special>{% for s in stations if s.name != u.station %}<option value="{{ s.name }}">{% endfor %}</datalist>
+<datalist id="choice-stations">{% for s in stations if s.name != u.station %}<option value="{{ s.name }}">{% endfor %}</datalist>
 <form method="post" action="/choices"><input type="hidden" name="csrf" value="{{ csrf() }}">
+{% set vals = [no_transfer_text] if u.no_transfer else choices %}
 {% for i in range(5) %}<label class="muted">Choice {{ i + 1 }} {{ '(required)' if i == 0 else '(optional)' }}</label>
-<select name="c" {{ 'required' if i == 0 }} {{ 'disabled' if chain }}><option value="">None</option>
-{% for s in stations if s.name != u.station %}<option {{ 'selected' if choices|length > i and choices[i] == s.name }}>{{ s.name }}</option>{% endfor %}</select>{% endfor %}
+<input name="c" data-picker="{{ 'choice1-stations' if i == 0 else 'choice-stations' }}" placeholder="Type to search or tap to pick" autocomplete="off" value="{{ vals[i] if vals|length > i }}" {{ 'required' if i == 0 }} {{ 'disabled' if chain }}>{% endfor %}
 {% if chain %}<p class="muted">Respond to your match before changing choices.</p>{% else %}<button>Save choices</button>{% endif %}</form></div>
 
 <div class="card"><h2>Your profile</h2>
-<p>{{ u.name }}<br><span class="muted">{{ u.designation }} · {{ u.department }} · {{ u.station }}</span></p>
-<form method="post" action="/mobile"><input type="hidden" name="csrf" value="{{ csrf() }}">
-<label class="muted">Mobile number</label><input name="mobile" value="{{ u.mobile }}" required inputmode="numeric"><button class="alt">Update mobile</button></form></div>
+<datalist id="stations">{% for s in stations %}<option value="{{ s.name }}">{% endfor %}</datalist>
+<form method="post" action="/profile" onsubmit="var e=this.elements;return confirm('Save these details?\n\nStation: '+e.station.value+'\nDesignation: '+e.designation.value+'\n\nIf you are in a proposed match and change station or designation, that match is cancelled.')">
+<input type="hidden" name="csrf" value="{{ csrf() }}">
+<label class="muted">Full name</label><input name="full_name" value="{{ u.name }}" required maxlength="80">
+<label class="muted">Mobile number</label><input name="mobile" value="{{ u.mobile }}" required inputmode="numeric">
+<label class="muted">Current station</label><input name="station" data-picker="stations" value="{{ u.station }}" required autocomplete="off">
+<label class="muted">Designation</label><select name="designation">{% for d in designations %}<option {{ 'selected' if d.name == u.designation }}>{{ d.name }}</option>{% endfor %}</select>
+<label class="muted">Department</label><select name="department">{% for d in departments %}<option {{ 'selected' if d.name == u.department }}>{{ d.name }}</option>{% endfor %}</select>
+<button class="alt">Update profile</button></form></div>
 {% endblock %}

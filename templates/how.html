@@ -1,0 +1,20 @@
+{% extends 'base.html' %}{% block body %}
+<div class="card"><h1>How this works</h1>
+<p>Enter your current station and up to 5 stations you would like to move to. The system looks for a circle of people whose wishes fit together, up to {{ N }} people. Each person moves to the station of the next person in the circle.</p></div>
+<div class="card"><h2>Example: a 6-person chain</h2>
+<table><tr><th>Person</th><th>Now at</th><th>Wants</th><th>Gets</th></tr>
+<tr><td>A</td><td>Delhi</td><td>Pune</td><td>Pune (B's station)</td></tr>
+<tr><td>B</td><td>Pune</td><td>Chennai</td><td>Chennai (C's station)</td></tr>
+<tr><td>C</td><td>Chennai</td><td>Mumbai</td><td>Mumbai (D's station)</td></tr>
+<tr><td>D</td><td>Mumbai</td><td>Kolkata</td><td>Kolkata (E's station)</td></tr>
+<tr><td>E</td><td>Kolkata</td><td>Jaipur</td><td>Jaipur (F's station)</td></tr>
+<tr><td>F</td><td>Jaipur</td><td>Delhi</td><td>Delhi (A's station)</td></tr></table>
+<p>A → B → C → D → E → F → A. No two of them could swap directly, but together all six get what they asked for.</p></div>
+<div class="card"><h2>The rules</h2>
+<p>• Neighbouring people in the circle must be within ±{{ K }} designation level(s) of each other.<br>
+• Everyone in the circle sees the other members and their contact details, then each person accepts or rejects.<br>
+• If anyone rejects, that circle is cancelled and everyone else goes back to the pool for new matches.<br>
+• If you don't need a transfer, choose "Currently no transfer needed" as Choice 1. You can still log in and browse.<br>
+• Shorter circles are tried first. Earlier registrations get priority.<br>
+• If a match fails only because of a designation gap, you may see an "Almost match" note. Names are never shown.</p></div>
+{% endblock %}

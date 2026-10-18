@@ -27,6 +27,7 @@ app.config.update(SECRET_KEY=SECRET, SQLALCHEMY_DATABASE_URI=db_url,
                   MAX_CONTENT_LENGTH=2 * 1024 * 1024)
 db = SQLAlchemy(app)
 LOCK = threading.Lock()
+NO_TRANSFER = "Currently no transfer needed"
 GMAIL = re.compile(r"^[a-z0-9._+-]+@gmail\.com$")
 GOOGLE_CLIENT_ID = os.environ.get("GOOGLE_CLIENT_ID", "")
 OTP_ENABLED = os.environ.get("OTP_ENABLED") == "1"  # email OTP is off unless set to 1
@@ -71,7 +72,15 @@ class User(db.Model):
 
     @property
     def clist(self):
-        return json.loads(self.choices or "[]")
+        try:
+            v = json.loads(self.choices or "[]")
+        except ValueError:  # "NONE" = user chose "Currently no transfer needed"
+            return []
+        return v if isinstance(v, list) else []
+
+    @property
+    def no_transfer(self):
+        return self.choices == "NONE"
 
     @property
     def admin(self):
@@ -109,9 +118,83 @@ class Otp(db.Model):
     created = db.Column(db.DateTime, default=datetime.utcnow)
 
 
+class Recent(db.Model):  # anonymous "recent requirement" feed (one row per user)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, unique=True)
+    station = db.Column(db.String(120))
+    designation = db.Column(db.String(120))
+    wants = db.Column(db.String(600))
+    at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
 def setting(key, default):
     s = db.session.get(Setting, key)
     return int(s.value) if s else default
+
+
+_open = {"t": 0, "g": None}  # cached designation-free graph for "almost match" hints
+
+
+def matching_on():
+    return setting("ON", 1) == 1
+
+
+def station_map():
+    return {s.name.lower(): s.name for s in Station.query}
+
+
+def ago(dt):
+    s = int((datetime.utcnow() - dt).total_seconds())
+    if s < 60:
+        return "just now"
+    if s < 3600:
+        return f"{s // 60} min ago"
+    if s < 86400:
+        return f"{s // 3600} h ago"
+    return f"{s // 86400} d ago"
+
+
+def note_recent(u):
+    r = Recent.query.filter_by(user_id=u.id).first() or Recent(user_id=u.id)
+    r.station, r.designation, r.wants, r.at = u.station, u.designation, ", ".join(u.clist), datetime.utcnow()
+    db.session.add(r)
+    db.session.commit()
+
+
+def near_matches(u):
+    """Anonymous hints: chains that would exist if designation were ignored but are blocked by the K rule."""
+    k, n = setting("K", 1), setting("N", 6)
+    if _open["g"] is None or time.time() - _open["t"] > 120:
+        ranks = {d.name: d.rank for d in Designation.query}
+        taken = {m.user_id for m in Member.query}
+        free = [x for x in User.query.all() if x.id not in taken and x.clist and x.designation in ranks]
+        free.sort(key=lambda x: (not x.admin, x.created_at, x.id))
+        people = [matching.P(x.id, x.station, x.clist, ranks[x.designation]) for x in free]
+        adj, radj = matching.build_graph(people, 10**6)
+        _open["g"] = (adj, radj, {p.id: p for p in people}, {x.id: x.designation for x in free})
+        _open["t"] = time.time()
+    adj, radj, pm, dname = _open["g"]
+    if u.id not in adj:
+        return []
+    hints, blocked = [], set()
+    for _ in range(5):
+        cyc = matching.find_cycle(u.id, adj, radj, n, blocked)
+        if not cyc:
+            break
+        blocked.add(frozenset(cyc))
+        edges = [(cyc[i], cyc[(i + 1) % len(cyc)]) for i in range(len(cyc))]
+        bad = [e for e in edges if abs(pm[e[0]].rank - pm[e[1]].rank) > k]
+        if not bad:
+            continue  # valid under K (e.g. a rejected group): not a designation problem
+        prev = cyc[-1]  # the person who wants this user's station
+        if (prev, u.id) in bad:
+            h = (f"A {dname[prev]} person at {pm[prev].station} wants your station ({u.station}), "
+                 f"but the designation difference is more than ±{k}.")
+        else:
+            h = f"A {len(cyc)}-person chain through your station exists, but one link has a designation difference above ±{k}."
+        if h not in hints:
+            hints.append(h)
+    return hints[:3]
 
 # ---------------------------------------------------------------- helpers
 def send_mail(to, subject, body):
@@ -177,30 +260,96 @@ def clean_mobile(raw):
     return d if re.fullmatch(r"[6-9]\d{9}", d) else None
 
 
-def load_excel(src):
-    """Sheets: Stations(Station) | Designations(Designation, Rank) | Departments(Department). Adds/updates only."""
+BASE = os.path.dirname(os.path.abspath(__file__))
+EXCEL = os.environ.get("EXCEL_FILE") or os.path.join(BASE, "data.xlsx")
+_xl = {"mtime": 0, "checked": 0, "error": "", "kept": 0}
+
+
+def parse_excel(src):
+    """Sheets: Stations (col A) | Designations (A name, B rank) | Departments (col A). Row 1 is a header."""
     wb = load_workbook(src, data_only=True)
-    rows = lambda n: [r for r in wb[n].iter_rows(min_row=2, values_only=True) if r and r[0] not in (None, "")]
-    for r in rows("Stations"):
-        n = str(r[0]).strip()
-        if not Station.query.filter_by(name=n).first():
-            db.session.add(Station(name=n))
-    for r in rows("Departments"):
-        n = str(r[0]).strip()
-        if not Department.query.filter_by(name=n).first():
-            db.session.add(Department(name=n))
+
+    def rows(n):
+        if n not in wb.sheetnames:
+            raise ValueError(f"sheet '{n}' not found (found: {', '.join(wb.sheetnames)})")
+        return [r for r in wb[n].iter_rows(min_row=2, values_only=True)
+                if r and r[0] is not None and str(r[0]).strip()]
+
+    stations = {str(r[0]).strip() for r in rows("Stations")}
+    depts = {str(r[0]).strip() for r in rows("Departments")}
+    desigs = {}
     for r in rows("Designations"):
-        n, rk = str(r[0]).strip(), int(r[1])
-        d = Designation.query.filter_by(name=n).first()
-        if d:
-            d.rank = rk
+        try:
+            desigs[str(r[0]).strip()] = int(float(r[1]))
+        except (TypeError, ValueError, IndexError):
+            raise ValueError(f"Designations sheet: '{r[0]}' needs a number in column B (rank)")
+    if not stations or not desigs or not depts:
+        raise ValueError("Stations, Designations and Departments must each have at least one row")
+    return stations, desigs, depts
+
+
+def load_excel(src=EXCEL):
+    """Make the dropdown tables match the Excel file. Items users still rely on are never deleted."""
+    stations, desigs, depts = parse_excel(src)
+    users = User.query.all()
+    used_st = {u.station for u in users} | {c for u in users for c in u.clist}
+    used_dg, used_dp = {u.designation for u in users}, {u.department for u in users}
+    kept = 0
+    for model, wanted, used in ((Station, stations, used_st), (Department, depts, used_dp)):
+        have = set()
+        for row in model.query.all():
+            if row.name in wanted:
+                have.add(row.name)
+            elif row.name in used:
+                kept += 1
+            else:
+                db.session.delete(row)
+        for n in wanted - have:
+            db.session.add(model(name=n))
+    have = set()
+    for d in Designation.query.all():
+        if d.name in desigs:
+            d.rank = desigs[d.name]
+            have.add(d.name)
+        elif d.name in used_dg:
+            kept += 1
         else:
+            db.session.delete(d)
+    for n, rk in desigs.items():
+        if n not in have:
             db.session.add(Designation(name=n, rank=rk))
     db.session.commit()
+    _xl["kept"] = kept
+
+
+def sync_excel(force=False):
+    if not os.path.exists(EXCEL):
+        _xl["error"] = f"{os.path.basename(EXCEL)} not found next to app.py"
+        return
+    m = os.path.getmtime(EXCEL)
+    if not force and m == _xl["mtime"]:
+        return
+    _xl["mtime"] = m
+    try:
+        load_excel(EXCEL)
+        _xl["error"] = ""
+    except Exception as e:
+        db.session.rollback()
+        _xl["error"] = f"{type(e).__name__}: {e}"
+        print("Excel load failed:", _xl["error"], flush=True)
+
+
+@app.before_request
+def excel_watch():  # picks up a replaced data.xlsx without a restart (checked at most every 30 s)
+    if time.time() - _xl["checked"] > 30:
+        _xl["checked"] = time.time()
+        sync_excel()
 
 # ---------------------------------------------------------------- matching
 def run_matching(starts=None):
     """Find new matches. `starts`: user ids to search from (default: everyone free, by priority)."""
+    if not matching_on():
+        return 0
     k, n = setting("K", 1), setting("N", 6)
     ranks = {d.name: d.rank for d in Designation.query}
     taken = {m.user_id for m in Member.query}
@@ -225,6 +374,7 @@ def run_matching(starts=None):
             used.update(cyc)
             found.append(cyc)
     db.session.commit()
+    _open["t"] = 0
     for cyc in found:
         for uid in cyc:
             u = db.session.get(User, uid)
@@ -322,6 +472,11 @@ def index():
     return redirect("/dashboard" if me() else "/register")
 
 
+@app.route("/how-it-works")
+def how():
+    return render_template("how.html", K=setting("K", 1), N=setting("N", 6))
+
+
 @app.route("/register", methods=["GET", "POST"])
 @login_required
 def register():
@@ -330,13 +485,14 @@ def register():
     if request.method == "POST":
         f = request.form
         name, mob = f.get("full_name", "").strip(), clean_mobile(f.get("mobile"))
-        ok = (2 <= len(name) <= 80 and mob and Station.query.filter_by(name=f.get("station")).first()
+        st = station_map().get(f.get("station", "").strip().lower())
+        ok = (2 <= len(name) <= 80 and mob and st
               and Designation.query.filter_by(name=f.get("designation")).first()
               and Department.query.filter_by(name=f.get("department")).first())
         if not ok:
             flash("Please fill all fields correctly (10-digit Indian mobile number).", "error")
         else:
-            db.session.add(User(email=session["email"], name=name, mobile=mob, station=f["station"],
+            db.session.add(User(email=session["email"], name=name, mobile=mob, station=st,
                                 designation=f["designation"], department=f["department"]))
             db.session.commit()
             flash("Registered. Now add your preferred stations.", "ok")
@@ -361,8 +517,15 @@ def dashboard():
                       to=ms[(i + 1) % len(ms)].user.station, resp=m.response, me=m.user_id == u.id)
                  for i, m in enumerate(ms)]
         status, my_resp = mem.match.status, mem.response
+    recent = [dict(station=r.station, designation=r.designation, wants=r.wants, ago=ago(r.at))
+              for r in Recent.query.filter(Recent.user_id != u.id).order_by(Recent.at.desc()).limit(4)]
+    on = matching_on()
+    hints = near_matches(u) if (not mem and u.clist and on) else []
     return render_template("dashboard.html", u=u, chain=chain, status=status, my_resp=my_resp,
-                           stations=Station.query.order_by(Station.name).all(), choices=u.clist)
+                           stations=Station.query.order_by(Station.name).all(), choices=u.clist,
+                           designations=Designation.query.order_by(Designation.rank).all(),
+                           departments=Department.query.order_by(Department.name).all(),
+                           recent=recent, hints=hints, on=on, no_transfer_text=NO_TRANSFER)
 
 
 @app.post("/mobile")
@@ -378,21 +541,62 @@ def set_mobile():
     return redirect("/dashboard")
 
 
+@app.post("/profile")
+@login_required
+def update_profile():
+    u = me()
+    if not u:
+        return redirect("/register")
+    f = request.form
+    st = station_map().get(f.get("station", "").strip().lower())
+    name, mob = f.get("full_name", "").strip(), clean_mobile(f.get("mobile"))
+    if not (2 <= len(name) <= 80 and mob and st and Designation.query.filter_by(name=f.get("designation")).first()
+            and Department.query.filter_by(name=f.get("department")).first()):
+        flash("Please fill all fields correctly.", "error")
+        return redirect("/dashboard")
+    moved = (st, f["designation"]) != (u.station, u.designation)
+    with LOCK:
+        ids = [u.id]
+        mem = Member.query.filter_by(user_id=u.id).first()
+        if mem and moved:
+            ids = drop_match(mem.match)  # old match no longer valid
+        u.name, u.mobile, u.station, u.designation, u.department = name, mob, st, f["designation"], f["department"]
+        if not u.no_transfer:
+            u.choices = json.dumps([c for c in u.clist if c != st])
+        r = Recent.query.filter_by(user_id=u.id).first()
+        if r:
+            r.station, r.designation = st, u.designation
+        db.session.commit()
+        _open["t"] = 0
+        if moved:
+            run_matching(ids)
+    flash("Profile updated.", "ok")
+    return redirect("/dashboard")
+
+
 @app.post("/choices")
 @login_required
 def set_choices():
     u = me()
     if not u:
         return redirect("/register")
-    vals = [v for v in request.form.getlist("c") if v]
-    valid = {s.name for s in Station.query}
+    smap = station_map()
+    raw = [v.strip() for v in request.form.getlist("c") if v.strip()]
+    vals = [smap.get(v.lower()) for v in raw]
     if Member.query.filter_by(user_id=u.id).first():
         flash("Respond to your current match before changing choices.", "error")
-    elif not vals or len(set(vals)) != len(vals) or len(vals) > 5 or not set(vals) <= valid or u.station in vals:
-        flash("Pick 1 to 5 different stations (first is mandatory, not your own station).", "error")
+    elif raw and raw[0].lower() == NO_TRANSFER.lower():
+        u.choices = "NONE"
+        Recent.query.filter_by(user_id=u.id).delete()
+        db.session.commit()
+        _open["t"] = 0
+        flash("Saved. You are marked as not needing a transfer right now. You can change this anytime.", "ok")
+    elif not vals or len(set(vals)) != len(vals) or len(vals) > 5 or None in vals or u.station in vals:
+        flash("Pick 1 to 5 different stations from the list (first is mandatory, not your own station).", "error")
     else:
         u.choices = json.dumps(vals)
         db.session.commit()
+        note_recent(u)
         with LOCK:
             run_matching([u.id])
         flash("Choices saved.", "ok")
@@ -409,6 +613,7 @@ def respond():
             flash("No pending match.", "error")
         elif action == "accept":
             mem.response = "accept"
+            _open["t"] = 0
             if all(x.response == "accept" for x in mem.match.members):
                 mem.match.status = "confirmed"
                 for x in mem.match.members:
@@ -433,9 +638,9 @@ def admin():
     edit = db.session.get(User, request.args.get("edit", type=int) or 0)
     stats = dict(users=User.query.count(), pending=Match.query.filter_by(status="pending").count(),
                  confirmed=Match.query.filter_by(status="confirmed").count(),
-                 with_choices=User.query.filter(User.choices != "[]").count())
+                 with_choices=User.query.filter(~User.choices.in_(["[]", "NONE"])).count())
     return render_template("admin.html", users=users, edit=edit, stats=stats, q=q,
-                           K=setting("K", 1), N=setting("N", 6), matches=Match.query.all(),
+                           K=setting("K", 1), N=setting("N", 6), on=matching_on(), xl_error=_xl["error"], xl_kept=_xl["kept"], matches=Match.query.all(),
                            stations=Station.query.order_by(Station.name).all(),
                            designations=Designation.query.order_by(Designation.rank).all(),
                            departments=Department.query.order_by(Department.name).all())
@@ -459,14 +664,28 @@ def admin_settings():
     return redirect("/admin")
 
 
-@app.post("/admin/upload")
+@app.post("/admin/toggle")
 @admin_required
-def admin_upload():
-    try:
-        load_excel(request.files["file"])
-        flash("Excel loaded (new items added, ranks updated).", "ok")
-    except Exception as e:
-        flash(f"Could not read Excel: {e}", "error")
+def admin_toggle():
+    on = 0 if matching_on() else 1
+    s = db.session.get(Setting, "ON") or Setting(key="ON")
+    s.value = str(on)
+    db.session.add(s)
+    db.session.commit()
+    if on:
+        with LOCK:
+            flash(f"Matching is ON. {run_matching()} new match(es) found.", "ok")
+    else:
+        flash("Matching is OFF. Users can still save choices; matching resumes when you switch it on.", "ok")
+    return redirect("/admin")
+
+
+@app.post("/admin/reload")
+@admin_required
+def admin_reload():
+    sync_excel(force=True)
+    flash("Reloaded from data.xlsx." if not _xl["error"] else f"Excel problem: {_xl['error']}",
+          "ok" if not _xl["error"] else "error")
     return redirect("/admin")
 
 
@@ -537,8 +756,7 @@ def admin_export():
 
 with app.app_context():
     db.create_all()
-    if not Station.query.first() and os.path.exists("data.xlsx"):
-        load_excel("data.xlsx")
+    sync_excel(force=True)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)), debug=os.environ.get("DEBUG") == "1")

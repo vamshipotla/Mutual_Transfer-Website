@@ -5,5 +5,8 @@
 {% if is_admin() %}<a href="/admin" style="margin:0;font-weight:400">Admin</a>{% endif %}
 {% if session.email %}<span class="muted">{{ session.email }}</span>
 <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="link">Logout</button></form>{% endif %}</header>
+<div class="clock" id="clock"></div>
 <main>{% for c, t in get_flashed_messages(with_categories=true) %}<div class="msg {{ c }}">{{ t }}</div>{% endfor %}
-{% block body %}{% endblock %}</main></body></html>
+{% block body %}{% endblock %}</main>
+<footer><p class="muted center">Help or suggestions: <a href="mailto:mutualtransfer009@gmail.com">mutualtransfer009@gmail.com</a><br><a href="/how-it-works">How this works</a></p></footer>
+<script src="{{ url_for('static', filename='app.js') }}"></script></body></html>

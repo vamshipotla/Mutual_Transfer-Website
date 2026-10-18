@@ -13,3 +13,10 @@ button.link{background:none;color:var(--ac);width:auto;padding:0;margin:0}
 .msg{padding:10px 14px;border-radius:8px;margin-bottom:12px;background:#eef3ff}.msg.error{background:#ffecec}.msg.ok{background:#e9f8ee}
 table{width:100%;border-collapse:collapse;font-size:.85rem;display:block;overflow-x:auto}td,th{text-align:left;padding:6px;border-bottom:1px solid var(--bd)}
 .chain{padding-left:20px}.chain li{margin-bottom:10px}.me{font-weight:600}
+.clock{text-align:center;font-size:.8rem;color:var(--mut);padding:6px 0 0}
+footer{max-width:720px;margin:8px auto 32px;padding:0 16px}footer a{color:var(--ac)}
+.hint{margin:0 0 8px}
+
+.combo{position:relative}.combo-arrow{position:absolute;right:14px;top:14px;color:var(--mut);cursor:pointer;user-select:none}
+.combo-list{position:absolute;left:0;right:0;top:calc(100% - 8px);max-height:240px;overflow:auto;background:#fff;border:1px solid var(--bd);border-radius:8px;z-index:20;margin:0;padding:4px 0;list-style:none;box-shadow:0 6px 18px rgba(0,0,0,.08)}
+.combo-list li{padding:9px 12px;cursor:pointer}.combo-list li:hover{background:var(--bg)}.combo-list li.none{color:var(--mut);cursor:default}.combo-list li.sp{font-style:italic;border-bottom:1px solid var(--bd)}

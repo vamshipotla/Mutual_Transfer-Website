@@ -1,15 +1,18 @@
 {% extends 'base.html' %}{% block body %}
 <div class="card"><h1>Admin</h1>
+<form method="post" action="/admin/toggle"><input type="hidden" name="csrf" value="{{ csrf() }}">
+<p>Matching is currently <b>{{ 'ON' if on else 'OFF' }}</b></p><button class="{{ 'alt' if on }}">{{ 'Switch matching OFF' if on else 'Switch matching ON' }}</button></form>
 <p class="muted">{{ stats.users }} users · {{ stats.with_choices }} with choices · {{ stats.pending }} pending · {{ stats.confirmed }} confirmed</p>
 <form method="post" action="/admin/settings"><input type="hidden" name="csrf" value="{{ csrf() }}">
 <label class="muted">Designation rank difference allowed (K)</label><input type="number" name="K" value="{{ K }}" min="0" max="20">
 <label class="muted">Maximum cycle length (N, people in one chain)</label><input type="number" name="N" value="{{ N }}" min="2" max="30">
 <button>Save settings and re-match</button></form></div>
 
-<div class="card"><h2>Dropdown data (Excel)</h2>
-<p class="muted">Sheets: Stations, Designations (Designation, Rank), Departments.</p>
-<form method="post" action="/admin/upload" enctype="multipart/form-data"><input type="hidden" name="csrf" value="{{ csrf() }}">
-<input type="file" name="file" accept=".xlsx" required><button>Upload Excel</button></form>
+<div class="card"><h2>Dropdown data (data.xlsx)</h2>
+<p class="muted">Stations, designations and departments are read from <b>data.xlsx</b> on every start and whenever the file changes. Sheets: Stations, Designations (name, rank), Departments.</p>
+<p class="muted">Now loaded: {{ stations|length }} stations · {{ designations|length }} designations · {{ departments|length }} departments{% if xl_kept %} · {{ xl_kept }} old item(s) kept because users still use them{% endif %}</p>
+{% if xl_error %}<div class="msg error">Excel problem: {{ xl_error }}</div>{% endif %}
+<form method="post" action="/admin/reload"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="alt">Reload from data.xlsx now</button></form>
 <div class="row"><form method="post" action="/admin/rematch"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="alt">Re-run matching</button></form>
 <form method="post" action="/admin/clearblocks"><input type="hidden" name="csrf" value="{{ csrf() }}"><button class="alt">Clear rejected blocks</button></form></div>
 <a href="/admin/export">Download matches (Excel)</a></div>
@@ -25,7 +28,7 @@
 <div class="card"><h2>Users</h2>
 <form method="get"><input name="q" value="{{ q }}" placeholder="Search name or email"></form>
 <table><tr><th>Name</th><th>Email</th><th>Station</th><th>Desig.</th><th>Choices</th><th></th></tr>
-{% for x in users %}<tr><td>{{ x.name }}</td><td>{{ x.email }}</td><td>{{ x.station }}</td><td>{{ x.designation }}</td><td>{{ x.clist|join(', ') }}</td><td><a href="/admin?edit={{ x.id }}">Edit</a></td></tr>{% endfor %}</table></div>
+{% for x in users %}<tr><td>{{ x.name }}</td><td>{{ x.email }}</td><td>{{ x.station }}</td><td>{{ x.designation }}</td><td>{{ 'No transfer needed' if x.no_transfer else x.clist|join(', ') }}</td><td><a href="/admin?edit={{ x.id }}">Edit</a></td></tr>{% endfor %}</table></div>
 
 <div class="card"><h2>Matches</h2>
 <table><tr><th>#</th><th>Status</th><th>Chain</th></tr>
